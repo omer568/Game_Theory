@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Traffic Flow Simulator (Fixed Opt)</title>
+    <title>Traffic Flow Simulator</title>
     <style>
         :root {
             --bg: #0f172a;
@@ -48,6 +48,7 @@
 </head>
 <body>
 
+
 <div id="app">
     <div class="sidebar">
         <h2>Traffic Simulator</h2>
@@ -78,6 +79,7 @@
     </div>
 </div>
 
+
 <div id="edgeEditor">
     <h4 style="margin: 0 0 10px 0; color: var(--accent);">Edit Road</h4>
     <label>Base Time (a)</label><input type="number" id="editA" step="1"><br><br>
@@ -86,21 +88,24 @@
     <button class="secondary" onclick="closeEditor()" style="margin-top:5px">Cancel</button>
 </div>
 
+
 <script>
 let nodes = [], edges = [], nextNodeId = 1, nextEdgeId = 1;
 let selectedNode = null, draggingNode = null, editingEdge = null;
 const RADIUS = 18, ARROW_SIZE = 10;
 let CANVAS, CTX, CONTAINER;
 
+
 window.addEventListener('load', () => {
     CANVAS = document.getElementById('canvas');
     CTX = CANVAS.getContext('2d');
     CONTAINER = document.getElementById('canvasContainer');
     resize();
-    loadBraess(); // Load Braess by default per request
+    // loadBraess(); // Removed default load
     window.addEventListener('resize', resize);
     setupInteractions();
 });
+
 
 function resize() {
     if(CONTAINER && CANVAS) {
@@ -116,6 +121,7 @@ function log(msg) {
     const sb = document.getElementById('statusBar');
     if(sb) sb.innerText = msg;
 }
+
 
 // --- Interactions ---
 function setupInteractions() {
@@ -194,6 +200,7 @@ function saveEdgeEdit() {
 }
 function closeEditor() { document.getElementById('edgeEditor').style.display = 'none'; editingEdge = null; }
 
+
 // --- Drawing ---
 function draw() {
     if(!CTX) return;
@@ -234,6 +241,7 @@ function draw() {
     });
 }
 
+
 // --- Logic ---
 function shortestPath(startId, endId, flowMap, isMarginal) {
     const dist = {}, prev = {};
@@ -257,6 +265,7 @@ function shortestPath(startId, endId, flowMap, isMarginal) {
     return path.reverse();
 }
 
+
 function runNash(N, startId, endId) {
     let flows = {}; edges.forEach(e => flows[e.id] = 0);
     for (let i = 0; i < N; i++) {
@@ -269,6 +278,7 @@ function runNash(N, startId, endId) {
     return total / N;
 }
 
+
 // Fixed Frank-Wolfe with Line Search
 function runOptimal(N, startId, endId) {
     let x = {}; edges.forEach(e => x[e.id] = 0);
@@ -276,6 +286,7 @@ function runOptimal(N, startId, endId) {
     const p0 = shortestPath(startId, endId, x, false);
     if (!p0) return 0;
     p0.forEach(e => x[e.id] = N);
+
 
     const MAX_ITER = 50;
     for (let k = 0; k < MAX_ITER; k++) {
@@ -304,6 +315,7 @@ function runOptimal(N, startId, endId) {
     return total / N;
 }
 
+
 function calcTotalCost(x, y, alpha) {
     let cost = 0;
     edges.forEach(e => {
@@ -312,6 +324,7 @@ function calcTotalCost(x, y, alpha) {
     });
     return cost;
 }
+
 
 function runSimulation() {
     if (nodes.length < 2) { log("Need 2+ nodes"); return; }
@@ -327,11 +340,13 @@ function runSimulation() {
     draw();
 }
 
+
 function resetGraph() {
     nodes = []; edges = []; nextNodeId = 1; nextEdgeId = 1;
     nodes.push({id: nextNodeId++, x: 100, y: 300}); nodes.push({id: nextNodeId++, x: 600, y: 300});
     draw();
 }
+
 
 function loadBraess() {
     nodes = []; edges = []; nextNodeId=1; nextEdgeId=1;
@@ -354,6 +369,7 @@ function loadBraess() {
     edges.push({id: nextEdgeId++, source: 4, target: 2, a: 0, b: 0.01, nashFlow:0, optFlow:0});
     // A -> B: 0     => a=0, b=0 (The Paradox Link)
     edges.push({id: nextEdgeId++, source: 3, target: 4, a: 0, b: 0, nashFlow:0, optFlow:0}); 
+
 
     draw(); log("Loaded Braess (4000 cars)");
 }
