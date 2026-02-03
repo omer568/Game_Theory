@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic Simulator (Final Fixed)</title>
+    <style>
+        :root {
+            --bg: #0f172a; --panel: #1e293b; --input: #334155; --text: #f1f5f9;
+            --accent: #38bdf8; --success: #22c55e; --danger: #ef4444; --warning: #f59e0b;
+        }
+        html, body { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            background: var(--bg); color: var(--text); 
+            font-family: 'Segoe UI', sans-serif; overflow: hidden; 
+        }
+        #app { display: flex; width: 100%; height: 100%; }
+        
+        .sidebar { 
+            width: 320px; min-width: 320px; background: var(--panel); 
+            padding: 20px; display: flex; flex-direction: column; gap: 15px; 
+            border-right: 1px solid #333; overflow-y: auto; z-index: 10;
+        }
+        h2 { margin: 0 0 10px 0; color: var(--accent); font-size: 1.2rem; }
+        h3 { margin: 15px 0 5px 0; font-size: 0.9rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .control-group { background: var(--input); padding: 10px; border-radius: 6px; }
+        label { display: block; font-size: 0.85rem; margin-bottom: 5px; color: #cbd5e1; }
+        input[type="number"] { width: 90%; background: var(--bg); border: 1px solid #475569; color: white; padding: 6px; border-radius: 4px; }
+        
+        button { background: var(--accent); color: var(--bg); border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; width: 100%; }
+        button:hover { filter: brightness(1.1); }
+        button.secondary { background: var(--input); color: var(--text); margin-top: 5px; }
+        
+        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .stat-box { background: var(--bg); padding: 10px; border-radius: 4px; text-align: center; border: 1px solid #333; }
+        .stat-val { font-size: 1.1rem; font-weight: bold; display: block; }
+        .nash-val { color: var(--warning); }
+        .opt-val { color: var(--success); }
+        
+        /* Main Area */
+        .main { flex-grow: 1; position: relative; background: #000; display: flex; flex-direction: column; }
+        
+        canvas#canvas { flex-grow: 1; display: block; width: 100%; outline: none; }
+        
+        /* Analysis Panel (Fixed Overlay) */
+        .bottom-panel { 
+            height: 320px; 
+            min-height: 320px;
+            background: var(--panel); 
+            border-top: 2px solid var(--accent);
+            padding: 15px; 
+            display: none; /* Toggled by JS */
+            flex-direction: column; 
+            box-shadow: 0 -5px 20px rgba(0,0,0,0.8); 
+            z-index: 50;
+            position: absolute; bottom: 0; left: 0; right: 0;
+        }
+        
+        .chart-container { 
+            position: relative; 
+            flex-grow: 1; 
+            width: 100%; 
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 4px;
+        }
+        canvas#chartCanvas { width: 100%; height: 100%; display: block; }
+
+        .status-bar { position: absolute; bottom: 20px; left: 20px; background: rgba(15, 23, 42, 0.9); padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; pointer-events: none; border: 1px solid var(--accent); color: var(--accent); z-index: 5; }
+        #edgeEditor { position: absolute; display: none; background: var(--panel); border: 1px solid var(--accent); padding: 15px; border-radius: 8px; width: 200px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 100; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <div class="sidebar">
+        <h2>Traffic Simulator</h2>
+        <div class="control-group">
+            <label>Total Cars (N)</label>
+            <input type="number" id="numCars" value="4000" min="1" max="10000">
+        </div>
+        <button onclick="runSimulation()">▶ Run Simulation</button>
+        <div class="stats">
+            <div class="stat-box"><span style="font-size:0.8rem">Nash Avg Time</span><span class="stat-val nash-val" id="nashTime">-</span></div>
+            <div class="stat-box"><span style="font-size:0.8rem">Optimal Avg Time</span><span class="stat-val opt-val" id="optTime">-</span></div>
+        </div>
+        <div class="stat-box" style="grid-column: span 2;">
+            <span style="font-size:0.8rem">Price of Anarchy</span><span class="stat-val" id="poa" style="color:white">-</span>
+        </div>
+
+        <h3>Analysis</h3>
+        <button class="secondary" style="border: 1px solid var(--accent); color: var(--accent);" onclick="runUnselfishAnalysis()">📈 Wrong Choice Graph</button>
+        
+        <h3>Graph Controls</h3>
+        <button class="secondary" onclick="resetGraph()">⚠ Clear Graph</button>
+        <button class="secondary" onclick="loadBraess()">Load Braess Paradox</button>
+        
+        <div id="logs" style="font-family: monospace; font-size: 0.75rem; color: #64748b; margin-top: 20px; max-height: 150px; overflow-y: auto;"></div>
+    </div>
+    
+    <div class="main" id="canvasContainer">
+        <canvas id="canvas"></canvas>
+        <div class="status-bar" id="statusBar">Initializing...</div>
+        
+        <!-- Graph Panel -->
+        <div class="bottom-panel" id="analysisPanel">
+            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                <h4 style="margin:0; color:white;">Avg Time vs. Probability of Wrong Choice (p)</h4>
+                <button style="width:auto; padding:4px 12px; font-size:0.8rem;" onclick="closeAnalysis()">Close Graph</button>
+            </div>
+            <div class="chart-container" id="chartWrapper">
+                <canvas id="chartCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="edgeEditor">
+    <h4 style="margin: 0 0 10px 0; color: var(--accent);">Edit Road</h4>
+    <label>Base Time (a)</label><input type="number" id="editA" step="1"><br><br>
+    <label>Congestion Factor (b)</label><input type="number" id="editB" step="0.001"><br><br>
+    <button onclick="saveEdgeEdit()">Save</button>
+    <button class="secondary" onclick="closeEditor()" style="margin-top:5px">Cancel</button>
+</div>
+
+<script>
+// --- Global State ---
+let nodes = [], edges = [], nextNodeId = 1, nextEdgeId = 1;
+let selectedNode = null, draggingNode = null, editingEdge = null;
+const RADIUS = 18, ARROW_SIZE = 10;
+let CANVAS, CTX, CONTAINER;
+
+// --- Init ---
+window.addEventListener('load', () => {
+    CANVAS = document.getElementById('canvas');
+    CTX = CANVAS.getContext('2d');
+    CONTAINER = document.getElementById('canvasContainer');
+    resize();
+    loadBraess(); 
+    window.addEventListener('resize', resize);
+    setupInteractions();
+    log("System Ready.");
+});
+
+function resize() {
+    if(CONTAINER && CANVAS) {
+        CANVAS.width = CONTAINER.clientWidth;
+        CANVAS.height = CONTAINER.clientHeight; 
+        draw();
+    }
+}
+
+function closeAnalysis() {
+    document.getElementById('analysisPanel').style.display = 'none';
+}
+
+function log(msg) {
+    console.log(msg);
+    const l = document.getElementById('logs');
+    if(l) { l.innerHTML += `> ${msg}<br>`; l.scrollTop = l.scrollHeight; }
+    const sb = document.getElementById('statusBar');
+    if(sb) sb.innerText = msg;
+}
+
+// --- Interactions ---
+function setupInteractions() {
+    CANVAS.addEventListener('dblclick', (e) => {
+        const pos = getMousePos(e); if (findNodeAt(pos)) return;
+        nodes.push({ id: nextNodeId++, x: pos.x, y: pos.y }); draw();
+    });
+    CANVAS.addEventListener('mousedown', (e) => {
+        if(e.button !== 0) return;
+        const pos = getMousePos(e);
+        const node = findNodeAt(pos);
+        const edge = findEdgeAt(pos);
+        if (node) {
+            if (!selectedNode) { selectedNode = node; draggingNode = node; }
+            else {
+                if (selectedNode.id !== node.id) {
+                    const exists = edges.find(ed => ed.source === selectedNode.id && ed.target === node.id);
+                    if (!exists) {
+                        edges.push({ id: nextEdgeId++, source: selectedNode.id, target: node.id, a: 0, b: 0.01, nashFlow: 0, optFlow: 0 });
+                        log(`Road: ${selectedNode.id} -> ${node.id}`);
+                    }
+                }
+                selectedNode = null; draggingNode = node;
+            }
+        } else if (edge) { openEditor(edge, e.clientX, e.clientY); selectedNode = null; }
+        else { selectedNode = null; }
+        draw();
+    });
+    CANVAS.addEventListener('mousemove', (e) => { if (draggingNode) { const pos = getMousePos(e); draggingNode.x = pos.x; draggingNode.y = pos.y; draw(); } });
+    window.addEventListener('mouseup', () => { draggingNode = null; });
+    CANVAS.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const pos = getMousePos(e); const node = findNodeAt(pos); const edge = findEdgeAt(pos);
+        if (node) {
+            nodes = nodes.filter(n => n.id !== node.id);
+            edges = edges.filter(ed => ed.source !== node.id && ed.target !== node.id);
+            if(selectedNode === node) selectedNode = null;
+        } else if (edge) edges = edges.filter(ed => ed.id !== edge.id);
+        draw();
+    });
+}
+function getMousePos(evt) { const rect = CANVAS.getBoundingClientRect(); return { x: evt.clientX - rect.left, y: evt.clientY - rect.top }; }
+function findNodeAt(pos) { return nodes.find(n => Math.hypot(n.x - pos.x, n.y - pos.y) < RADIUS + 5); }
+function findEdgeAt(pos) {
+    for (let e of edges) {
+        const s = nodes.find(n => n.id === e.source); const t = nodes.find(n => n.id === e.target); if(!s || !t) continue;
+        const l2 = (s.x - t.x)**2 + (s.y - t.y)**2; if (l2 === 0) continue;
+        let t_proj = ((pos.x - s.x)*(t.x - s.x) + (pos.y - s.y)*(t.y - s.y)) / l2; t_proj = Math.max(0, Math.min(1, t_proj));
+        const px = s.x + t_proj*(t.x - s.x); const py = s.y + t_proj*(t.y - s.y);
+        if (Math.hypot(pos.x - px, pos.y - py) < 10) return e;
+    } return null;
+}
+function openEditor(edge, mx, my) {
+    editingEdge = edge;
+    const panel = document.getElementById('edgeEditor');
+    panel.style.display = 'block'; panel.style.left = Math.min(window.innerWidth - 220, mx)+'px'; panel.style.top = Math.min(window.innerHeight - 250, my)+'px';
+    document.getElementById('editA').value = edge.a; document.getElementById('editB').value = edge.b;
+}
+function saveEdgeEdit() { if (editingEdge) { editingEdge.a = parseFloat(document.getElementById('editA').value)||0; editingEdge.b = parseFloat(document.getElementById('editB').value)||0; draw(); closeEditor(); } }
+function closeEditor() { document.getElementById('edgeEditor').style.display = 'none'; editingEdge = null; }
+
+// --- Drawing (Network) ---
+function draw() {
+    if(!CTX) return;
+    CTX.fillStyle = '#0f172a'; CTX.fillRect(0, 0, CANVAS.width, CANVAS.height);
+    // Grid
+    CTX.strokeStyle = 'rgba(255,255,255,0.05)'; CTX.lineWidth = 1;
+    for(let i=0; i<CANVAS.width; i+=50) { CTX.beginPath(); CTX.moveTo(i,0); CTX.lineTo(i, CANVAS.height); CTX.stroke(); }
+    for(let i=0; i<CANVAS.height; i+=50) { CTX.beginPath(); CTX.moveTo(0,i); CTX.lineTo(CANVAS.width, i); CTX.stroke(); }
+    // Edges
+    edges.forEach(e => {
+        const s = nodes.find(n => n.id === e.source); const t = nodes.find(n => n.id === e.target); if(!s || !t) return;
+        const dx = t.x - s.x, dy = t.y - s.y, angle = Math.atan2(dy, dx);
+        const sx = s.x + Math.cos(angle)*RADIUS, sy = s.y + Math.sin(angle)*RADIUS;
+        const ex = t.x - Math.cos(angle)*RADIUS, ey = t.y - Math.sin(angle)*RADIUS;
+        CTX.beginPath(); CTX.moveTo(sx, sy); CTX.lineTo(ex, ey); CTX.strokeStyle = '#64748b'; CTX.lineWidth = 3; CTX.stroke();
+        CTX.beginPath(); CTX.moveTo(ex, ey); CTX.lineTo(ex - ARROW_SIZE*Math.cos(angle-Math.PI/6), ey - ARROW_SIZE*Math.sin(angle-Math.PI/6)); CTX.lineTo(ex - ARROW_SIZE*Math.cos(angle+Math.PI/6), ey - ARROW_SIZE*Math.sin(angle+Math.PI/6)); CTX.fillStyle = '#64748b'; CTX.fill();
+        const mx = (s.x + t.x)/2, my = (s.y + t.y)/2;
+        CTX.fillStyle = 'rgba(15, 23, 42, 0.85)'; CTX.fillRect(mx - 60, my - 30, 120, 60);
+        CTX.fillStyle = '#e2e8f0'; CTX.font = '12px monospace'; CTX.textAlign = 'center'; CTX.textBaseline = 'middle';
+        CTX.fillStyle = '#94a3b8'; CTX.fillText(`w=${e.a}+${e.b}l`, mx, my - 12);
+        CTX.fillStyle = '#f59e0b'; CTX.fillText(`N:${e.nashFlow}`, mx, my + 4);
+        CTX.fillStyle = '#22c55e'; CTX.fillText(`O:${Math.round(e.optFlow)}`, mx, my + 18);
+    });
+    // Nodes
+    nodes.forEach((n, index) => {
+        CTX.beginPath(); CTX.arc(n.x, n.y, RADIUS, 0, Math.PI*2);
+        if (index === 0) CTX.fillStyle = '#22c55e'; else if (index === 1 && nodes.length > 1) CTX.fillStyle = '#ef4444'; else CTX.fillStyle = '#3b82f6';
+        if (selectedNode === n) CTX.fillStyle = '#fbbf24';
+        CTX.fill(); CTX.strokeStyle = '#fff'; CTX.lineWidth = 2; CTX.stroke();
+        CTX.fillStyle = '#fff'; CTX.font = 'bold 12px Arial'; CTX.textAlign = 'center'; CTX.textBaseline = 'middle';
+        CTX.fillText(index===0?'S':(index===1?'T':n.id), n.x, n.y);
+    });
+}
+
+// --- Pathfinding ---
+function findAllPaths(u, endId, path = [], allPaths = []) {
+    path.push(u);
+    if (u === endId) {
+        const edgePath = [];
+        for(let i=0; i<path.length-1; i++) {
+            const e = edges.find(ed => ed.source === path[i] && ed.target === path[i+1]);
+            if(e) edgePath.push(e);
+        }
+        allPaths.push(edgePath);
+    } else {
+        const neighbors = edges.filter(e => e.source === u).map(e => e.target);
+        for (let v of neighbors) {
+            if (!path.includes(v)) findAllPaths(v, endId, [...path], allPaths);
+        }
+    }
+    return allPaths;
+}
+function getPathCost(pathEdges, flowMap) {
+    let c = 0;
+    for(let e of pathEdges) {
+        const f = flowMap[e.id] || 0;
+        c += e.a + e.b * f;
+    }
+    return c;
+}
+
+// --- Solvers ---
+function runNash(N, startId, endId) {
+    let flows = {}; edges.forEach(e => flows[e.id] = 0);
+    const allPaths = findAllPaths(startId, endId);
+    if (allPaths.length === 0) return 0;
+    for (let i = 0; i < N; i++) {
+        let bestP = null, minC = Infinity;
+        for (let p of allPaths) {
+            const c = getPathCost(p, flows);
+            if (c < minC) { minC = c; bestP = p; }
+        }
+        if (bestP) bestP.forEach(e => flows[e.id]++);
+    }
+    let total = 0; edges.forEach(e => { e.nashFlow = flows[e.id]; total += e.nashFlow*(e.a + e.b*e.nashFlow); });
+    return total / N;
+}
+
+function runOptimal(N, startId, endId) {
+    // Dijkstra Shortest Path Helper
+    const sp = (isMarginal) => {
+        const dist = {}, prev = {}; nodes.forEach(n => dist[n.id]=Infinity); dist[startId]=0;
+        const unvisited = new Set(nodes.map(n=>n.id));
+        while(unvisited.size > 0) {
+            let u=null, m=Infinity; for(let id of unvisited) if(dist[id]<m){m=dist[id];u=id;}
+            if(u===null||u===endId) break; unvisited.delete(u);
+            const myEdges=edges.filter(e=>e.source===u);
+            for(let e of myEdges) {
+                if(!unvisited.has(e.target)) continue;
+                const f=x[e.id]||0; const c=isMarginal?(e.a+2*e.b*f):(e.a+e.b*f);
+                if(dist[u]+c<dist[e.target]){dist[e.target]=dist[u]+c; prev[e.target]=e;}
+            }
+        }
+        const p=[]; let curr=endId; while(curr!==startId){const e=prev[curr]; if(!e)return null; p.push(e); curr=e.source;}
+        return p.reverse();
+    };
+
+    let x = {}; edges.forEach(e => x[e.id]=0);
+    const p0 = sp(false); if(!p0) return 0;
+    p0.forEach(e => x[e.id]=N);
+
+    // Frank-Wolfe with Golden Section
+    const calcC = (aX, aY, alpha) => {
+        let tc = 0; edges.forEach(e => { const f = aX[e.id]+alpha*(aY[e.id]-aX[e.id]); tc += f*(e.a+e.b*f); }); return tc;
+    };
+
+    for(let k=0; k<50; k++) {
+        const pY = sp(true); if(!pY) break;
+        let y = {}; edges.forEach(e=>y[e.id]=0); pY.forEach(e=>y[e.id]=N);
+        let a=0, b=1; const phi=(Math.sqrt(5)-1)/2;
+        let c = b-phi*(b-a), d=a+phi*(b-a);
+        for(let l=0; l<15; l++) { if(calcC(x,y,c)<calcC(x,y,d)){b=d;d=c;c=b-phi*(b-a);}else{a=c;c=d;d=a+phi*(b-a);} }
+        const alpha=(a+b)/2;
+        edges.forEach(e => x[e.id]+=alpha*(y[e.id]-x[e.id]));
+    }
+    let total = 0; edges.forEach(e => { e.optFlow = x[e.id]; total += e.optFlow*(e.a + e.b*e.optFlow); });
+    return total / N;
+}
+
+// --- Analysis & Manual Charting ---
+async function runUnselfishAnalysis() {
+    if (nodes.length < 2) { log("Need graph."); return; }
+    
+    // 1. Show Panel
+    document.getElementById('analysisPanel').style.display = 'flex';
+    
+    // 2. Setup Chart Canvas
+    const cc = document.getElementById('chartCanvas');
+    const wrapper = document.getElementById('chartWrapper');
+    cc.width = wrapper.clientWidth;
+    cc.height = wrapper.clientHeight;
+    
+    log("Simulating... please wait...");
+    document.getElementById('statusBar').style.color = '#f59e0b';
+    await new Promise(r => setTimeout(r, 100)); // Paint
+
+    const N = parseInt(document.getElementById('numCars').value);
+    const startId = nodes[0].id; const endId = nodes[1].id;
+    const allPaths = findAllPaths(startId, endId);
+    if (allPaths.length === 0) { log("No paths."); return; }
+
+    const data = [];
+    const STEPS = 30;
+
+    for (let i = 0; i <= STEPS; i++) {
+        const p = i / STEPS;
+        let flows = {}; edges.forEach(e => flows[e.id] = 0);
+        
+        for (let car = 0; car < N; car++) {
+            let chosenPath = null;
+            const costs = allPaths.map(path => ({ path, cost: getPathCost(path, flows) }));
+            const minCost = Math.min(...costs.map(c => c.cost));
+            const best = costs.filter(c => Math.abs(c.cost - minCost) < 0.001);
+            const wrong = costs.filter(c => Math.abs(c.cost - minCost) >= 0.001);
+
+            if (wrong.length > 0 && Math.random() < p) {
+                chosenPath = wrong[Math.floor(Math.random() * wrong.length)].path;
+            } else {
+                chosenPath = best[Math.floor(Math.random() * best.length)].path;
+            }
+            if (chosenPath) chosenPath.forEach(e => flows[e.id]++);
+        }
+        
+        let total = 0; edges.forEach(e => { const f = flows[e.id]; total += f * (e.a + e.b * f); });
+        data.push({ x: p, y: total / N });
+    }
+    
+    drawNativeChart(data);
+    log("Analysis Complete.");
+    document.getElementById('statusBar').style.color = '#38bdf8';
+}
+
+function drawNativeChart(data) {
+    const c = document.getElementById('chartCanvas');
+    const cx = c.getContext('2d');
+    const w = c.width; const h = c.height;
+    
+    // BG
+    cx.fillStyle = '#1e293b'; cx.fillRect(0,0,w,h);
+    
+    const p = 40; // padding
+    const gw = w - p*2;
+    const gh = h - p*2;
+    
+    // Scales
+    let minY = Infinity, maxY = -Infinity;
+    data.forEach(d => { if(d.y<minY)minY=d.y; if(d.y>maxY)maxY=d.y; });
+    const rY = (maxY - minY) || 1;
+    
+    const mapX = (x) => p + x * gw;
+    const mapY = (y) => h - p - ((y - minY)/rY) * gh;
+    
+    // Grid
+    cx.strokeStyle = '#334155'; cx.lineWidth = 1;
+    cx.beginPath();
+    cx.moveTo(p, p); cx.lineTo(p, h-p); cx.lineTo(w-p, h-p);
+    cx.stroke();
+    
+    // Line
+    cx.strokeStyle = '#38bdf8'; cx.lineWidth = 2;
+    cx.beginPath();
+    data.forEach((d, i) => {
+        const x = mapX(d.x); const y = mapY(d.y);
+        if(i===0) cx.moveTo(x, y); else cx.lineTo(x, y);
+    });
+    cx.stroke();
+    
+    // Points
+    cx.fillStyle = '#fff';
+    data.forEach(d => {
+        cx.beginPath(); cx.arc(mapX(d.x), mapY(d.y), 3, 0, Math.PI*2); cx.fill();
+    });
+    
+    // Labels
+    cx.fillStyle = '#94a3b8'; cx.font = '10px sans-serif'; cx.textAlign='center';
+    for(let i=0; i<=5; i++){
+        const v = i/5; cx.fillText(v.toFixed(1), mapX(v), h-p+15);
+    }
+    cx.textAlign='right';
+    for(let i=0; i<=5; i++){
+        const v = minY + (i/5)*rY; cx.fillText(v.toFixed(0), p-5, mapY(v)+3);
+    }
+    cx.textAlign='center'; cx.fillStyle='#fff';
+    cx.fillText("Wrong Choice Prob (p)", w/2, h-5);
+}
+
+// --- Main Runners ---
+function runSimulation() {
+    if (nodes.length < 2) return; const N = parseInt(document.getElementById('numCars').value); const startId = nodes[0].id, endId = nodes[1].id;
+    const nashAvg = runNash(N, startId, endId); const optAvg = runOptimal(N, startId, endId);
+    document.getElementById('nashTime').innerText = nashAvg.toFixed(2); document.getElementById('optTime').innerText = optAvg.toFixed(2);
+    if (optAvg > 0 && !isNaN(optAvg)) document.getElementById('poa').innerText = (nashAvg/optAvg).toFixed(3); else document.getElementById('poa').innerText = "1.000";
+    draw();
+}
+function resetGraph() { nodes = []; edges = []; nextNodeId = 1; nextEdgeId = 1; nodes.push({id: nextNodeId++, x: 100, y: 300}); nodes.push({id: nextNodeId++, x: 600, y: 300}); draw(); }
+function loadBraess() { nodes = []; edges = []; nextNodeId=1; nextEdgeId=1; nodes.push({id: nextNodeId++, x: 100, y: 300}); nodes.push({id: nextNodeId++, x: 700, y: 300}); nodes.push({id: nextNodeId++, x: 400, y: 100}); nodes.push({id: nextNodeId++, x: 400, y: 500}); document.getElementById('numCars').value = 4000; edges.push({id: nextEdgeId++, source: 1, target: 3, a: 0, b: 0.01, nashFlow:0, optFlow:0}); edges.push({id: nextEdgeId++, source: 3, target: 2, a: 45, b: 0, nashFlow:0, optFlow:0}); edges.push({id: nextEdgeId++, source: 1, target: 4, a: 45, b: 0, nashFlow:0, optFlow:0}); edges.push({id: nextEdgeId++, source: 4, target: 2, a: 0, b: 0.01, nashFlow:0, optFlow:0}); edges.push({id: nextEdgeId++, source: 3, target: 4, a: 0, b: 0, nashFlow:0, optFlow:0}); draw(); }
+</script>
+</body>
+</html>
